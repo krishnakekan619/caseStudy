@@ -1,0 +1,34 @@
+# Python artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Tests and coverage
+tests/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Local config and secrets
+.env
+.env.*
+*.local
+
+# Editor and OS noise
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+
+# Docs
+*.md

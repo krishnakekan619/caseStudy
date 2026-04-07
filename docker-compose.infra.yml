@@ -1,0 +1,144 @@
+version: "3.9"
+
+# ─── Shared infrastructure: Harbor, SonarQube, Trivy, GitHub Runner ──────────
+# Start with: docker compose -f docker-compose.infra.yml up -d
+
+networks:
+  infra-net:
+    name: infra-net
+  dev-net:
+    name: dev-net
+  stage-net:
+    name: stage-net
+  prod-net:
+    name: prod-net
+
+volumes:
+  harbor-registry-data:
+  harbor-db-data:
+  sonarqube-data:
+  sonarqube-db-data:
+  trivy-cache:
+  pip-cache:      # shared pip download cache across all test runs
+  sonar-cache:    # sonar-scanner work directory cache (analysis artifacts)
+
+services:
+
+  # ── Harbor: PostgreSQL backend ───────────────────────────────────────────────
+  harbor-db:
+    image: goharbor/harbor-db:v2.10.0
+    container_name: harbor-db
+    networks: [infra-net]
+    environment:
+      POSTGRES_PASSWORD: harbor123
+    volumes:
+      - harbor-db-data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Harbor: Core API ─────────────────────────────────────────────────────────
+  harbor-core:
+    image: goharbor/harbor-core:v2.10.0
+    container_name: harbor-core
+    networks: [infra-net]
+    depends_on:
+      harbor-db:
+        condition: service_healthy
+    environment:
+      DATABASE_TYPE:       postgresql
+      POSTGRESQL_HOST:     harbor-db
+      POSTGRESQL_PORT:     "5432"
+      POSTGRESQL_USERNAME: postgres
+      POSTGRESQL_PASSWORD: harbor123
+      POSTGRESQL_DATABASE: registry
+      HARBOR_ADMIN_PASSWORD: Harbor12345
+      SECRET_KEY:          changeme-32-char-secret-key!!!!!
+    restart: unless-stopped
+
+  # ── Harbor: Registry (image store) ──────────────────────────────────────────
+  harbor-registry:
+    image: goharbor/registry-photon:v2.10.0
+    container_name: harbor-registry
+    networks: [infra-net]
+    depends_on: [harbor-core]
+    ports:
+      - "5000:5000"
+    volumes:
+      - harbor-registry-data:/storage
+    restart: unless-stopped
+
+  # ── Harbor: Web Portal ───────────────────────────────────────────────────────
+  harbor-portal:
+    image: goharbor/harbor-portal:v2.10.0
+    container_name: harbor-portal
+    networks: [infra-net]
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+
+  # ── SonarQube: PostgreSQL backend ────────────────────────────────────────────
+  sonarqube-db:
+    image: postgres:15-alpine
+    container_name: sonarqube-db
+    networks: [infra-net]
+    environment:
+      POSTGRES_USER:     sonar
+      POSTGRES_PASSWORD: sonar
+      POSTGRES_DB:       sonarqube
+    volumes:
+      - sonarqube-db-data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sonar"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── SonarQube: Analysis Server ───────────────────────────────────────────────
+  sonarqube:
+    image: sonarqube:10-community
+    container_name: sonarqube
+    networks: [infra-net]
+    depends_on:
+      sonarqube-db:
+        condition: service_healthy
+    ports:
+      - "9000:9000"
+    environment:
+      SONAR_JDBC_URL:      jdbc:postgresql://sonarqube-db:5432/sonarqube
+      SONAR_JDBC_USERNAME: sonar
+      SONAR_JDBC_PASSWORD: sonar
+    ulimits:
+      nofile: { soft: 65536, hard: 65536 }
+    volumes:
+      - sonarqube-data:/opt/sonarqube/data
+    restart: unless-stopped
+
+  # ── Trivy: Image Scanner ─────────────────────────────────────────────────────
+  trivy:
+    image: aquasec/trivy:latest
+    container_name: trivy
+    networks: [infra-net]
+    volumes:
+      - trivy-cache:/root/.cache/trivy
+      - /var/run/docker.sock:/var/run/docker.sock
+    entrypoint: ["tail", "-f", "/dev/null"]   # kept alive; invoked per pipeline step
+    restart: unless-stopped
+
+  # ── GitHub Actions Self-Hosted Runner ────────────────────────────────────────
+  github-runner:
+    image: myoung34/github-runner:latest
+    container_name: github-runner
+    networks: [infra-net]
+    environment:
+      RUNNER_NAME:  docker-runner-01
+      REPO_URL:     https://github.com/${GITHUB_ORG}/${GITHUB_REPO}
+      RUNNER_TOKEN: ${RUNNER_TOKEN}
+      LABELS:       docker,self-hosted
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: unless-stopped

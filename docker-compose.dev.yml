@@ -1,0 +1,112 @@
+version: "3.9"
+
+# ── Dev environment ───────────────────────────────────────────────────────────
+# Usage:
+#   IMAGE_TAG=dev-a1b2c3d docker compose -f docker-compose.dev.yml up -d
+#
+# Secrets flow:
+#   Vault Agent (sidecar) authenticates to Vault using AppRole,
+#   fetches DB credentials, writes them to a shared volume (/vault/secrets/),
+#   then app containers source /vault/secrets/db.env before starting.
+
+networks:
+  dev-net:
+    external: true
+
+volumes:
+  dev-db-data:
+  dev-vault-secrets:      # shared between vault-agent and app containers
+
+services:
+
+  # ── PostgreSQL DB ────────────────────────────────────────────────────────────
+  db:
+    image: postgres:15-alpine
+    container_name: dev-db
+    networks: [dev-net]
+    environment:
+      POSTGRES_USER:     stocks
+      POSTGRES_PASSWORD: stocks123
+      POSTGRES_DB:       stocksdb
+    volumes:
+      - dev-db-data:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U stocks -d stocksdb"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Vault Agent Sidecar ───────────────────────────────────────────────────────
+  # Authenticates to Vault, fetches secrets, writes env files to shared volume.
+  # App containers depend on this being healthy before they start.
+  vault-agent:
+    image: hashicorp/vault:1.16
+    container_name: dev-vault-agent
+    networks: [dev-net]
+    environment:
+      VAULT_ADDR:       ${VAULT_ADDR:-http://vault:8200}
+      VAULT_ROLE_ID:    ${APP_VAULT_ROLE_ID}
+      VAULT_SECRET_ID:  ${APP_VAULT_SECRET_ID}
+    volumes:
+      - dev-vault-secrets:/vault/secrets
+      - ./vault/agent/agent.hcl:/vault/config/agent.hcl:ro
+    command: vault agent -config=/vault/config/agent.hcl
+    restart: unless-stopped
+    healthcheck:
+      # Ready when the sentinel file written by the agent template exists
+      test: ["CMD", "test", "-f", "/vault/secrets/.ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  # ── Stock Listing Service ────────────────────────────────────────────────────
+  stock-listing:
+    image: ${HARBOR_REGISTRY:-myregistry.local:5000}/stocks/stock-listing:${IMAGE_TAG:-latest}
+    container_name: dev-stock-listing
+    networks: [dev-net]
+    depends_on:
+      db:
+        condition: service_healthy
+      vault-agent:
+        condition: service_healthy
+    # Source the env file written by vault-agent before uvicorn starts
+    entrypoint: ["/bin/sh", "-c", "set -a && . /vault/secrets/db.env && set +a && exec uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+    volumes:
+      - dev-vault-secrets:/vault/secrets:ro
+    environment:
+      APP_ENV: dev
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    labels:
+      app.service: stock-listing
+      app.env:     dev
+      app.version: ${IMAGE_TAG:-latest}
+
+  # ── Trade Service ────────────────────────────────────────────────────────────
+  trade:
+    image: ${HARBOR_REGISTRY:-myregistry.local:5000}/stocks/trade:${IMAGE_TAG:-latest}
+    container_name: dev-trade
+    networks: [dev-net]
+    depends_on:
+      db:
+        condition: service_healthy
+      vault-agent:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c", "set -a && . /vault/secrets/db.env && set +a && exec uvicorn app.main:app --host 0.0.0.0 --port 8001"]
+    volumes:
+      - dev-vault-secrets:/vault/secrets:ro
+    environment:
+      APP_ENV: dev
+    ports:
+      - "8001:8001"
+    restart: unless-stopped
+    labels:
+      app.service: trade
+      app.env:     dev
+      app.version: ${IMAGE_TAG:-latest}

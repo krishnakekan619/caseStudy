@@ -1,0 +1,55 @@
+version: "3.9"
+
+# ─── HashiCorp Vault — Secrets Management ────────────────────────────────────
+# Start alongside infra:
+#   docker compose -f docker-compose.infra.yml -f docker-compose.vault.yml up -d
+#
+# Bootstrap (first time only):
+#   docker compose -f docker-compose.vault.yml exec vault sh /vault/scripts/init.sh
+
+networks:
+  infra-net:
+    external: true
+  dev-net:
+    external: true
+  stage-net:
+    external: true
+  prod-net:
+    external: true
+
+volumes:
+  vault-data:
+  vault-logs:
+
+services:
+
+  vault:
+    image: hashicorp/vault:1.16
+    container_name: vault
+    networks:
+      - infra-net
+      - dev-net
+      - stage-net
+      - prod-net
+    ports:
+      - "8200:8200"    # Vault API + UI
+    environment:
+      VAULT_ADDR:        http://0.0.0.0:8200
+      VAULT_API_ADDR:    http://vault:8200
+      VAULT_LOG_LEVEL:   info
+    cap_add:
+      - IPC_LOCK          # required by Vault to prevent secrets being swapped to disk
+    volumes:
+      - vault-data:/vault/data
+      - vault-logs:/vault/logs
+      - ./vault/config.hcl:/vault/config/config.hcl:ro
+      - ./vault/policies:/vault/policies:ro
+      - ./vault/init.sh:/vault/scripts/init.sh:ro
+    command: vault server -config=/vault/config/config.hcl
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "vault", "status", "-address=http://localhost:8200"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
