@@ -1,0 +1,124 @@
+name: Rollback
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment"
+        required: true
+        type: choice
+        options: [dev, stage, prod]
+      rollback_tag:
+        description: "Harbor image tag to roll back to (e.g. v1.3.0 | stage-a1b2c3d | dev-a1b2c3d)"
+        required: true
+        type: string
+
+# Prevent two rollbacks from running simultaneously against the same environment
+concurrency:
+  group: rollback-${{ github.event.inputs.environment }}
+  cancel-in-progress: false    # never cancel a rollback — let it finish
+
+env:
+  VAULT_ADDR: ${{ secrets.VAULT_ADDR }}
+
+jobs:
+  rollback:
+    name: "Rollback ${{ github.event.inputs.environment }} → ${{ github.event.inputs.rollback_tag }}"
+    runs-on: [self-hosted, docker]
+    environment: ${{ github.event.inputs.environment }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── Fetch Harbor credentials from Vault (same as ci-cd.yml) ──────────────
+      - name: Fetch Harbor credentials from Vault
+        id: vault
+        uses: hashicorp/vault-action@v3
+        with:
+          url:      ${{ env.VAULT_ADDR }}
+          method:   approle
+          roleId:   ${{ secrets.VAULT_ROLE_ID }}
+          secretId: ${{ secrets.VAULT_SECRET_ID }}
+          secrets: |
+            secret/data/ci/pipeline harbor_registry | harbor_registry ;
+            secret/data/ci/pipeline harbor_username | harbor_username ;
+            secret/data/ci/pipeline harbor_password | harbor_password
+
+      - name: Login to Harbor
+        run: |
+          echo "${{ steps.vault.outputs.harbor_password }}" | \
+            docker login ${{ steps.vault.outputs.harbor_registry }} \
+              -u "${{ steps.vault.outputs.harbor_username }}" --password-stdin
+
+      - name: Verify rollback tag exists in Harbor
+        run: |
+          for SVC in stock-listing trade; do
+            docker pull \
+              ${{ steps.vault.outputs.harbor_registry }}/stocks/${SVC}:${{ github.event.inputs.rollback_tag }} \
+              || (echo "ERROR: Tag '${{ github.event.inputs.rollback_tag }}' not found for ${SVC}" && exit 1)
+          done
+
+      - name: Roll back Dev
+        if: github.event.inputs.environment == 'dev'
+        env:
+          HARBOR_REGISTRY:      ${{ steps.vault.outputs.harbor_registry }}
+          IMAGE_TAG:            ${{ github.event.inputs.rollback_tag }}
+          VAULT_ADDR:           ${{ env.VAULT_ADDR }}
+          APP_VAULT_ROLE_ID:    ${{ secrets.APP_VAULT_ROLE_ID }}
+          APP_VAULT_SECRET_ID:  ${{ secrets.APP_VAULT_SECRET_ID }}
+        run: |
+          docker compose -f docker-compose.dev.yml pull
+          docker compose -f docker-compose.dev.yml up -d --remove-orphans
+
+      - name: Roll back Stage
+        if: github.event.inputs.environment == 'stage'
+        env:
+          HARBOR_REGISTRY:      ${{ steps.vault.outputs.harbor_registry }}
+          IMAGE_TAG:            ${{ github.event.inputs.rollback_tag }}
+          VAULT_ADDR:           ${{ env.VAULT_ADDR }}
+          APP_VAULT_ROLE_ID:    ${{ secrets.APP_VAULT_ROLE_ID }}
+          APP_VAULT_SECRET_ID:  ${{ secrets.APP_VAULT_SECRET_ID }}
+        run: |
+          docker compose -f docker-compose.stage.yml pull
+          docker compose -f docker-compose.stage.yml up -d --remove-orphans
+
+      - name: Roll back Prod
+        if: github.event.inputs.environment == 'prod'
+        env:
+          HARBOR_REGISTRY:      ${{ steps.vault.outputs.harbor_registry }}
+          IMAGE_TAG:            ${{ github.event.inputs.rollback_tag }}
+          VAULT_ADDR:           ${{ env.VAULT_ADDR }}
+          APP_VAULT_ROLE_ID:    ${{ secrets.APP_VAULT_ROLE_ID }}
+          APP_VAULT_SECRET_ID:  ${{ secrets.APP_VAULT_SECRET_ID }}
+        run: |
+          docker compose -f docker-compose.prod.yml pull
+          docker compose -f docker-compose.prod.yml up -d --remove-orphans
+
+      - name: Smoke test after rollback
+        run: |
+          case "${{ github.event.inputs.environment }}" in
+            dev)   PORTS="8000 8001" ;;
+            stage) PORTS="8010 8011" ;;
+            prod)  PORTS="8020 8021" ;;
+          esac
+          sleep 10
+          for PORT in $PORTS; do
+            curl --fail --retry 3 --retry-delay 3 http://localhost:${PORT}/health \
+              || (echo "Health check failed on port $PORT" && exit 1)
+          done
+
+      # Always logout — clean credentials from Docker config on runner
+      - name: Docker logout
+        if: always()
+        run: docker logout ${{ steps.vault.outputs.harbor_registry }}
+
+      - name: Write run summary
+        if: always()
+        run: |
+          echo "## Rollback Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Field | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|-------|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Environment | ${{ github.event.inputs.environment }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Tag | \`${{ github.event.inputs.rollback_tag }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Triggered by | ${{ github.actor }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Run ID | ${{ github.run_id }} |" >> "$GITHUB_STEP_SUMMARY"

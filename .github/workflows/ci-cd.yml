@@ -1,0 +1,503 @@
+name: Stocks App — CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - develop          # → deploy to Dev
+      - "release/**"     # → deploy to Stage
+    tags:
+      - "v*.*.*"         # → deploy to Prod
+  pull_request:
+    branches: [main, develop]
+
+# Cancel an in-progress run for the same branch/tag when a newer push arrives.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  VAULT_ADDR: ${{ secrets.VAULT_ADDR }}
+  SONAR_HOST: http://sonarqube:9000
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Pipeline job graph (→ = "depends on"):
+#
+#  T=0  fetch-secrets ──────────────────────────────────────────────────────┐
+#  T=0  paths-filter  ──────────────────────────────────────────────────────┤
+#  T=0  test          (no deps, starts immediately, matrix per service)      │
+#                                                                            │
+#  sonarqube          → fetch-secrets + paths-filter (matrix: changed svcs) │
+#  build              → fetch-secrets + test + sonarqube (matrix: ALL svcs) │
+#                       uses BuildKit --cache-from Harbor → fast on re-run  │
+#  scan               → fetch-secrets + build  (matrix: ALL svcs)           │
+#  deploy-*           → fetch-secrets + build + scan                        │
+#  notify-failure     → all above (if: failure())                           │
+# ─────────────────────────────────────────────────────────────────────────────
+
+jobs:
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # 0a. Fetch secrets from Vault
+  # ════════════════════════════════════════════════════════════════════════════
+  fetch-secrets:
+    name: Fetch Secrets from Vault
+    runs-on: [self-hosted, docker]
+    outputs:
+      harbor_registry: ${{ steps.vault.outputs.harbor_registry }}
+      harbor_username: ${{ steps.vault.outputs.harbor_username }}
+      harbor_password: ${{ steps.vault.outputs.harbor_password }}
+      sonar_token:     ${{ steps.vault.outputs.sonar_token }}
+
+    steps:
+      - name: Authenticate to Vault and fetch CI secrets
+        id: vault
+        uses: hashicorp/vault-action@v3.0.0
+        with:
+          url:      ${{ env.VAULT_ADDR }}
+          method:   approle
+          roleId:   ${{ secrets.VAULT_ROLE_ID }}
+          secretId: ${{ secrets.VAULT_SECRET_ID }}
+          secrets: |
+            secret/data/ci/pipeline harbor_registry  | harbor_registry ;
+            secret/data/ci/pipeline harbor_username  | harbor_username ;
+            secret/data/ci/pipeline harbor_password  | harbor_password ;
+            secret/data/ci/pipeline sonar_token      | sonar_token
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # 0b. Detect which services actually changed
+  #     → test and sonarqube skip unchanged services entirely
+  #     → build always runs for ALL services (cache makes it ~10s on no-change)
+  #     On tag pushes (prod releases) every service is always considered changed.
+  # ════════════════════════════════════════════════════════════════════════════
+  paths-filter:
+    name: Detect Changed Services
+    runs-on: [self-hosted, docker]
+    outputs:
+      changed:           ${{ steps.filter.outputs.changes }}
+      stock-listing:     ${{ steps.filter.outputs.stock-listing }}
+      trade:             ${{ steps.filter.outputs.trade }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Detect service changes
+        id: filter
+        uses: dorny/paths-filter@v3.0.2
+        with:
+          # On a tag push treat every service as changed so everything is built.
+          # On branch pushes filter by actual file paths.
+          base: ${{ startsWith(github.ref, 'refs/tags/') && '' || github.event.before }}
+          filters: |
+            stock-listing:
+              - 'services/stock-listing/**'
+              - 'db/**'
+            trade:
+              - 'services/trade/**'
+              - 'db/**'
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # 1. Unit tests — ONLY for changed services, both run in parallel
+  #    Uses a named Docker volume (pip-cache) so packages are never
+  #    re-downloaded from PyPI between runs on the same runner.
+  # ════════════════════════════════════════════════════════════════════════════
+  test:
+    name: "Tests [${{ matrix.service }}]"
+    runs-on: [self-hosted, docker]
+    needs: paths-filter
+    # Run when paths-filter says this service changed (or all services on tag)
+    if: |
+      needs.paths-filter.outputs.changed != '[]' &&
+      needs.paths-filter.outputs.changed != ''
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJson(needs.paths-filter.outputs.changed) }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run pytest (SQLite, in-container, pip cache mounted)
+        run: |
+          docker run --rm \
+            -v pip-cache:/root/.cache/pip \
+            -v "${{ github.workspace }}/services/${{ matrix.service }}:/app" \
+            -w /app \
+            python:3.12-slim \
+            sh -c "pip install -q -r requirements.txt && pytest tests/ -v --tb=short"
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # 2. Static code analysis — ONLY for changed services, both in parallel
+  #    Mounts a named volume (sonar-cache) so the scanner does not re-parse
+  #    unchanged files on every run.
+  # ════════════════════════════════════════════════════════════════════════════
+  sonarqube:
+    name: "SonarQube [${{ matrix.service }}]"
+    runs-on: [self-hosted, docker]
+    needs: [fetch-secrets, paths-filter]
+    if: |
+      needs.paths-filter.outputs.changed != '[]' &&
+      needs.paths-filter.outputs.changed != ''
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJson(needs.paths-filter.outputs.changed) }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run SonarQube scan — ${{ matrix.service }}
+        run: |
+          docker run --rm \
+            --network infra-net \
+            -e SONAR_HOST_URL=${{ env.SONAR_HOST }} \
+            -e SONAR_LOGIN=${{ needs.fetch-secrets.outputs.sonar_token }} \
+            -v sonar-cache:/opt/sonar-scanner/.sonar/cache \
+            -v "${{ github.workspace }}/services/${{ matrix.service }}:/usr/src" \
+            sonarsource/sonar-scanner-cli:5.0.1 \
+            sonar-scanner \
+              -Dsonar.projectBaseDir=/usr/src \
+              -Dsonar.qualitygate.wait=true
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # 3. Build Docker images & push to Harbor — ALWAYS both services in parallel
+  #
+  #    BuildKit registry cache strategy:
+  #    --cache-from pulls the last successful builder-stage layers from Harbor.
+  #    --cache-to   writes updated layers back so the next run hits the cache.
+  #    mode=max     caches ALL intermediate layers (including the pip install
+  #                 step), not just the final stage — this is the key speedup.
+  #
+  #    First run (cold):  pip install runs normally   ~90s
+  #    Warm run (cache):  pip install is a cache hit  ~5s
+  # ════════════════════════════════════════════════════════════════════════════
+  build:
+    name: "Build & Push [${{ matrix.service }}]"
+    runs-on: [self-hosted, docker]
+    needs: [fetch-secrets, test, sonarqube]
+    # build always runs for ALL services — cache makes unchanged ones ~10 s
+    # but skip the whole stage if test/sonarqube for changed services failed.
+    if: always() && !failure() && !cancelled()
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [stock-listing, trade]
+    outputs:
+      image_tag: ${{ steps.meta.outputs.image_tag }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute immutable image tag
+        id: meta
+        run: |
+          SHA7=$(git rev-parse --short=7 HEAD)
+          echo "image_tag=git-${SHA7}" >> "$GITHUB_OUTPUT"
+
+      - name: Login to Harbor
+        run: |
+          echo "${{ needs.fetch-secrets.outputs.harbor_password }}" | \
+            docker login ${{ needs.fetch-secrets.outputs.harbor_registry }} \
+              -u "${{ needs.fetch-secrets.outputs.harbor_username }}" --password-stdin
+
+      # Set up Docker Buildx so we can use --cache-from/--cache-to type=registry
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3.3.0
+        with:
+          driver-opts: network=host    # runner can reach Harbor on localhost:5000
+
+      - name: Build and push ${{ matrix.service }} (with registry cache)
+        env:
+          REGISTRY: ${{ needs.fetch-secrets.outputs.harbor_registry }}
+          SVC:      ${{ matrix.service }}
+          TAG:      ${{ steps.meta.outputs.image_tag }}
+        run: |
+          docker buildx build \
+            --platform linux/amd64 \
+            --cache-from "type=registry,ref=${REGISTRY}/stocks/${SVC}:buildcache" \
+            --cache-to   "type=registry,ref=${REGISTRY}/stocks/${SVC}:buildcache,mode=max" \
+            --label "org.opencontainers.image.revision=${{ github.sha }}" \
+            --label "org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}" \
+            --label "org.opencontainers.image.created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --label "build.run=${{ github.run_number }}" \
+            --label "service=${SVC}" \
+            --tag "${REGISTRY}/stocks/${SVC}:${TAG}" \
+            --push \
+            services/${SVC}
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3.5.0
+
+      - name: Sign image (keyless OIDC)
+        env:
+          COSIGN_EXPERIMENTAL: "1"
+          REGISTRY: ${{ needs.fetch-secrets.outputs.harbor_registry }}
+          SVC:      ${{ matrix.service }}
+          TAG:      ${{ steps.meta.outputs.image_tag }}
+        run: cosign sign --yes "${REGISTRY}/stocks/${SVC}:${TAG}"
+
+      - name: Generate SBOM (CycloneDX) with Trivy
+        env:
+          REGISTRY: ${{ needs.fetch-secrets.outputs.harbor_registry }}
+          SVC:      ${{ matrix.service }}
+          TAG:      ${{ steps.meta.outputs.image_tag }}
+        run: |
+          docker run --rm \
+            -v trivy-cache:/root/.cache/trivy \
+            aquasec/trivy:0.51.4 \
+            image \
+              --format cyclonedx \
+              --output /dev/stdout \
+              "${REGISTRY}/stocks/${SVC}:${TAG}" \
+            > sbom-${SVC}.cdx.json
+
+      - name: Attach SBOM to image
+        env:
+          REGISTRY: ${{ needs.fetch-secrets.outputs.harbor_registry }}
+          SVC:      ${{ matrix.service }}
+          TAG:      ${{ steps.meta.outputs.image_tag }}
+        run: |
+          cosign attach sbom \
+            --sbom sbom-${SVC}.cdx.json \
+            --type cyclonedx \
+            "${REGISTRY}/stocks/${SVC}:${TAG}"
+
+      - name: Upload SBOM as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-${{ matrix.service }}
+          path: sbom-${{ matrix.service }}.cdx.json
+          retention-days: 90
+
+      - name: Docker logout
+        if: always()
+        run: docker logout ${{ needs.fetch-secrets.outputs.harbor_registry }}
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # 4. Security scan — both services in parallel
+  #    trivy-cache volume persists the CVE DB so it is not re-downloaded
+  #    on every run (~120 MB download avoided on warm runs).
+  # ════════════════════════════════════════════════════════════════════════════
+  scan:
+    name: "Trivy Scan [${{ matrix.service }}]"
+    runs-on: [self-hosted, docker]
+    needs: [fetch-secrets, build]
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [stock-listing, trade]
+
+    steps:
+      - name: Login to Harbor
+        run: |
+          echo "${{ needs.fetch-secrets.outputs.harbor_password }}" | \
+            docker login ${{ needs.fetch-secrets.outputs.harbor_registry }} \
+              -u "${{ needs.fetch-secrets.outputs.harbor_username }}" --password-stdin
+
+      - name: Scan ${{ matrix.service }} for CVEs
+        run: |
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v trivy-cache:/root/.cache/trivy \
+            aquasec/trivy:0.51.4 \
+            image \
+              --exit-code 1 \
+              --severity HIGH,CRITICAL \
+              --ignore-unfixed \
+              --format table \
+              ${{ needs.fetch-secrets.outputs.harbor_registry }}/stocks/${{ matrix.service }}:${{ needs.build.outputs.image_tag }}
+
+      - name: Docker logout
+        if: always()
+        run: docker logout ${{ needs.fetch-secrets.outputs.harbor_registry }}
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # 5. Deploy to Dev  (branch: develop)
+  # ════════════════════════════════════════════════════════════════════════════
+  deploy-dev:
+    name: Deploy → Dev
+    runs-on: [self-hosted, docker]
+    needs: [fetch-secrets, build, scan]
+    if: github.ref == 'refs/heads/develop'
+    environment: dev
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Login to Harbor
+        run: |
+          echo "${{ needs.fetch-secrets.outputs.harbor_password }}" | \
+            docker login ${{ needs.fetch-secrets.outputs.harbor_registry }} \
+              -u "${{ needs.fetch-secrets.outputs.harbor_username }}" --password-stdin
+
+      - name: Tag images as dev-<sha>
+        run: |
+          SHA7=$(git rev-parse --short=7 HEAD)
+          REGISTRY=${{ needs.fetch-secrets.outputs.harbor_registry }}
+          for SVC in stock-listing trade; do
+            docker pull  ${REGISTRY}/stocks/${SVC}:git-${SHA7}
+            docker tag   ${REGISTRY}/stocks/${SVC}:git-${SHA7} ${REGISTRY}/stocks/${SVC}:dev-${SHA7}
+            docker push  ${REGISTRY}/stocks/${SVC}:dev-${SHA7}
+          done
+          echo "DEPLOY_TAG=dev-${SHA7}" >> "$GITHUB_ENV"
+
+      - name: Deploy to Dev
+        env:
+          HARBOR_REGISTRY:      ${{ needs.fetch-secrets.outputs.harbor_registry }}
+          IMAGE_TAG:            ${{ env.DEPLOY_TAG }}
+          VAULT_ADDR:           ${{ env.VAULT_ADDR }}
+          APP_VAULT_ROLE_ID:    ${{ secrets.APP_VAULT_ROLE_ID }}
+          APP_VAULT_SECRET_ID:  ${{ secrets.APP_VAULT_SECRET_ID }}
+        run: |
+          docker compose -f docker-compose.dev.yml pull
+          docker compose -f docker-compose.dev.yml up -d --remove-orphans
+
+      - name: Smoke test Dev
+        run: |
+          sleep 10
+          curl --fail --retry 3 --retry-delay 3 http://localhost:8000/health
+          curl --fail --retry 3 --retry-delay 3 http://localhost:8001/health
+
+      - name: Docker logout
+        if: always()
+        run: docker logout ${{ needs.fetch-secrets.outputs.harbor_registry }}
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # 6. Deploy to Stage  (branch: release/**)
+  # ════════════════════════════════════════════════════════════════════════════
+  deploy-stage:
+    name: Deploy → Stage
+    runs-on: [self-hosted, docker]
+    needs: [fetch-secrets, build, scan]
+    if: startsWith(github.ref, 'refs/heads/release/')
+    environment:
+      name: stage
+      url:  http://localhost:8010
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Login to Harbor
+        run: |
+          echo "${{ needs.fetch-secrets.outputs.harbor_password }}" | \
+            docker login ${{ needs.fetch-secrets.outputs.harbor_registry }} \
+              -u "${{ needs.fetch-secrets.outputs.harbor_username }}" --password-stdin
+
+      - name: Tag images as stage-<sha>
+        run: |
+          SHA7=$(git rev-parse --short=7 HEAD)
+          REGISTRY=${{ needs.fetch-secrets.outputs.harbor_registry }}
+          for SVC in stock-listing trade; do
+            docker pull  ${REGISTRY}/stocks/${SVC}:git-${SHA7}
+            docker tag   ${REGISTRY}/stocks/${SVC}:git-${SHA7} ${REGISTRY}/stocks/${SVC}:stage-${SHA7}
+            docker push  ${REGISTRY}/stocks/${SVC}:stage-${SHA7}
+          done
+          echo "DEPLOY_TAG=stage-${SHA7}" >> "$GITHUB_ENV"
+
+      - name: Deploy to Stage
+        env:
+          HARBOR_REGISTRY:      ${{ needs.fetch-secrets.outputs.harbor_registry }}
+          IMAGE_TAG:            ${{ env.DEPLOY_TAG }}
+          VAULT_ADDR:           ${{ env.VAULT_ADDR }}
+          APP_VAULT_ROLE_ID:    ${{ secrets.APP_VAULT_ROLE_ID }}
+          APP_VAULT_SECRET_ID:  ${{ secrets.APP_VAULT_SECRET_ID }}
+        run: |
+          docker compose -f docker-compose.stage.yml pull
+          docker compose -f docker-compose.stage.yml up -d --remove-orphans
+
+      - name: Smoke test Stage
+        run: |
+          sleep 10
+          curl --fail --retry 3 --retry-delay 3 http://localhost:8010/health
+          curl --fail --retry 3 --retry-delay 3 http://localhost:8011/health
+
+      - name: Docker logout
+        if: always()
+        run: docker logout ${{ needs.fetch-secrets.outputs.harbor_registry }}
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # 7. Deploy to Prod  (git tag: v*.*.*)
+  # ════════════════════════════════════════════════════════════════════════════
+  deploy-prod:
+    name: Deploy → Prod
+    runs-on: [self-hosted, docker]
+    needs: [fetch-secrets, build, scan]
+    if: startsWith(github.ref, 'refs/tags/v')
+    environment:
+      name: prod
+      url:  http://localhost:8020
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract semver from git tag
+        id: version
+        run: echo "version=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+
+      - name: Login to Harbor
+        run: |
+          echo "${{ needs.fetch-secrets.outputs.harbor_password }}" | \
+            docker login ${{ needs.fetch-secrets.outputs.harbor_registry }} \
+              -u "${{ needs.fetch-secrets.outputs.harbor_username }}" --password-stdin
+
+      - name: Tag images with semver + latest
+        run: |
+          SHA7=$(git rev-parse --short=7 HEAD)
+          VERSION=${{ steps.version.outputs.version }}
+          REGISTRY=${{ needs.fetch-secrets.outputs.harbor_registry }}
+          for SVC in stock-listing trade; do
+            docker pull  ${REGISTRY}/stocks/${SVC}:git-${SHA7}
+            docker tag   ${REGISTRY}/stocks/${SVC}:git-${SHA7} ${REGISTRY}/stocks/${SVC}:${VERSION}
+            docker tag   ${REGISTRY}/stocks/${SVC}:git-${SHA7} ${REGISTRY}/stocks/${SVC}:latest
+            docker push  ${REGISTRY}/stocks/${SVC}:${VERSION}
+            docker push  ${REGISTRY}/stocks/${SVC}:latest
+          done
+
+      - name: Deploy to Prod
+        env:
+          HARBOR_REGISTRY:      ${{ needs.fetch-secrets.outputs.harbor_registry }}
+          IMAGE_TAG:            ${{ steps.version.outputs.version }}
+          VAULT_ADDR:           ${{ env.VAULT_ADDR }}
+          APP_VAULT_ROLE_ID:    ${{ secrets.APP_VAULT_ROLE_ID }}
+          APP_VAULT_SECRET_ID:  ${{ secrets.APP_VAULT_SECRET_ID }}
+        run: |
+          docker compose -f docker-compose.prod.yml pull
+          docker compose -f docker-compose.prod.yml up -d --remove-orphans
+
+      - name: Smoke test Prod
+        run: |
+          sleep 10
+          curl --fail --retry 3 --retry-delay 3 http://localhost:8020/health
+          curl --fail --retry 3 --retry-delay 3 http://localhost:8021/health
+
+      - name: Docker logout
+        if: always()
+        run: docker logout ${{ needs.fetch-secrets.outputs.harbor_registry }}
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # 8. Notify on failure
+  # ════════════════════════════════════════════════════════════════════════════
+  notify-failure:
+    name: Notify on Failure
+    runs-on: [self-hosted, docker]
+    needs: [test, sonarqube, build, scan, deploy-dev, deploy-stage, deploy-prod]
+    if: failure()
+
+    steps:
+      - name: Write failure summary
+        run: |
+          echo "## Pipeline Failed" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Field | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|-------|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Branch/Tag | \`${{ github.ref_name }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Commit | \`${{ github.sha }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Triggered by | ${{ github.actor }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Run | ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }} |" >> "$GITHUB_STEP_SUMMARY"
+
+      # - name: Notify Slack
+      #   uses: slackapi/slack-github-action@v1.26.0
+      #   with:
+      #     payload: '{"text":"Pipeline failed on `${{ github.ref_name }}` — ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"}'
+      #   env:
+      #     SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

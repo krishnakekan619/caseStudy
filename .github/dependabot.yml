@@ -1,0 +1,41 @@
+version: 2
+
+updates:
+
+  # ── GitHub Actions versions ────────────────────────────────────────────────
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    labels:
+      - dependencies
+      - github-actions
+    commit-message:
+      prefix: "chore(deps)"
+
+  # ── Python: stock-listing service ─────────────────────────────────────────
+  - package-ecosystem: pip
+    directory: /services/stock-listing
+    schedule:
+      interval: weekly
+      day: monday
+    labels:
+      - dependencies
+      - python
+      - stock-listing
+    commit-message:
+      prefix: "chore(deps)"
+
+  # ── Python: trade service ──────────────────────────────────────────────────
+  - package-ecosystem: pip
+    directory: /services/trade
+    schedule:
+      interval: weekly
+      day: monday
+    labels:
+      - dependencies
+      - python
+      - trade
+    commit-message:
+      prefix: "chore(deps)"
