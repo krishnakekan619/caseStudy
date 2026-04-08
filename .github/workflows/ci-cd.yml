@@ -71,19 +71,32 @@ jobs:
             secret/data/ci/pipeline registry_ns | REGISTRY_NS;
             secret/data/ci/pipeline sonar_token | SONAR_TOKEN
 
+      #- name: Export outputs
+      #  id: export
+      #  run: |
+      #    echo "registry_url=$REGISTRY_URL" >> $GITHUB_OUTPUT
+      #    echo "registry_user=$REGISTRY_USER" >> $GITHUB_OUTPUT
+      #    echo "registry_pass=$REGISTRY_PASS" >> $GITHUB_OUTPUT
+      #    echo "registry_ns=$REGISTRY_NS" >> $GITHUB_OUTPUT
+      #    echo "sonar_token=$SONAR_TOKEN" >> $GITHUB_OUTPUT
+
       - name: Export outputs
         id: export
         run: |
-          echo "registry_url=$REGISTRY_URL" >> $GITHUB_OUTPUT
-          echo "registry_user=$REGISTRY_USER" >> $GITHUB_OUTPUT
-          echo "registry_pass=$REGISTRY_PASS" >> $GITHUB_OUTPUT
-          echo "registry_ns=$REGISTRY_NS" >> $GITHUB_OUTPUT
-          echo "sonar_token=$SONAR_TOKEN" >> $GITHUB_OUTPUT
+          echo "registry_url=${{ env.REGISTRY_URL }}" >> $GITHUB_OUTPUT
+          echo "registry_user=${{ env.REGISTRY_USER }}" >> $GITHUB_OUTPUT
+          echo "registry_pass=${{ env.REGISTRY_PASS }}" >> $GITHUB_OUTPUT
+          echo "registry_ns=${{ env.REGISTRY_NS }}" >> $GITHUB_OUTPUT
+          echo "sonar_token=${{ env.SONAR_TOKEN }}" >> $GITHUB_OUTPUT
 
       - name: Debug Vault values
         run: |
           echo "USER=$REGISTRY_USER"
           echo "URL=$REGISTRY_URL"
+      - name: Debug outputs (final check)
+        run: |
+          echo "OUT_USER=${{ steps.export.outputs.registry_user }}"
+          echo "OUT_URL=${{ steps.export.outputs.registry_url }}"
 
       - name: Safe Secret Validation (No Exposure)
         run: |
@@ -118,9 +131,9 @@ jobs:
     name: Detect Changed Services
     runs-on: [self-hosted, docker]
     outputs:
-      changed:           ${{ steps.filter.outputs.changes }}
-      stock-listing:     ${{ steps.filter.outputs.stock-listing }}
-      trade:             ${{ steps.filter.outputs.trade }}
+      changed: ${{ steps.filter.outputs.changes }}
+      stock-listing: ${{ steps.filter.outputs.stock-listing }}
+      trade: ${{ steps.filter.outputs.trade }}
 
     steps:
       - uses: actions/checkout@v4
@@ -245,6 +258,11 @@ jobs:
           echo "USER=${{ needs.fetch-secrets.outputs.registry_user }}"
           echo "URL=${{ needs.fetch-secrets.outputs.registry_url }}"
 
+      - name: Debug outputs (final check)
+        run: |
+          echo "OUT_USER=${{ steps.export.outputs.registry_user }}"
+          echo "OUT_URL=${{ steps.export.outputs.registry_url }}"
+
       - name: Login to Container Registry
         run: |
           echo "${{ needs.fetch-secrets.outputs.registry_pass }}" | \
@@ -260,14 +278,14 @@ jobs:
       - name: Build and push ${{ matrix.service }} (with registry cache)
         env:
           REGISTRY: ${{ needs.fetch-secrets.outputs.registry_url || 'docker.io' }}
-          NS:       ${{ needs.fetch-secrets.outputs.registry_ns || 'stocks' }}
-          SVC:      ${{ matrix.service }}
-          TAG:      ${{ steps.meta.outputs.image_tag }}
+          NS: ${{ needs.fetch-secrets.outputs.registry_ns || 'stocks' }}
+          SVC: ${{ matrix.service }}
+          TAG: ${{ steps.meta.outputs.image_tag }}
         run: |
           docker buildx build \
             --platform linux/amd64 \
             --cache-from "type=registry,ref=${REGISTRY}/${NS}/${SVC}:buildcache" \
-            --cache-to   "type=registry,ref=${REGISTRY}/${NS}/${SVC}:buildcache,mode=max" \
+            --cache-to "type=registry,ref=${REGISTRY}/${NS}/${SVC}:buildcache,mode=max" \
             --label "org.opencontainers.image.revision=${{ github.sha }}" \
             --label "org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}" \
             --label "org.opencontainers.image.created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
@@ -284,17 +302,17 @@ jobs:
         env:
           COSIGN_EXPERIMENTAL: "1"
           REGISTRY: ${{ needs.fetch-secrets.outputs.registry_url || 'docker.io' }}
-          NS:       ${{ needs.fetch-secrets.outputs.registry_ns || 'stocks' }}
-          SVC:      ${{ matrix.service }}
-          TAG:      ${{ steps.meta.outputs.image_tag }}
+          NS: ${{ needs.fetch-secrets.outputs.registry_ns || 'stocks' }}
+          SVC: ${{ matrix.service }}
+          TAG: ${{ steps.meta.outputs.image_tag }}
         run: cosign sign --yes "${REGISTRY}/${NS}/${SVC}:${TAG}"
 
       - name: Generate SBOM (CycloneDX) with Trivy
         env:
           REGISTRY: ${{ needs.fetch-secrets.outputs.registry_url || 'docker.io' }}
-          NS:       ${{ needs.fetch-secrets.outputs.registry_ns || 'stocks' }}
-          SVC:      ${{ matrix.service }}
-          TAG:      ${{ steps.meta.outputs.image_tag }}
+          NS: ${{ needs.fetch-secrets.outputs.registry_ns || 'stocks' }}
+          SVC: ${{ matrix.service }}
+          TAG: ${{ steps.meta.outputs.image_tag }}
         run: |
           docker run --rm \
             -v trivy-cache:/root/.cache/trivy \
@@ -308,9 +326,9 @@ jobs:
       - name: Attach SBOM to image
         env:
           REGISTRY: ${{ needs.fetch-secrets.outputs.registry_url || 'docker.io' }}
-          NS:       ${{ needs.fetch-secrets.outputs.registry_ns || 'stocks' }}
-          SVC:      ${{ matrix.service }}
-          TAG:      ${{ steps.meta.outputs.image_tag }}
+          NS: ${{ needs.fetch-secrets.outputs.registry_ns || 'stocks' }}
+          SVC: ${{ matrix.service }}
+          TAG: ${{ steps.meta.outputs.image_tag }}
         run: |
           cosign attach sbom \
             --sbom sbom-${SVC}.cdx.json \
