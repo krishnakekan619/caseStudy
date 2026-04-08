@@ -49,11 +49,11 @@ jobs:
     name: Fetch Secrets from Vault
     runs-on: [self-hosted, docker]
     outputs:
-      registry_url:    ${{ steps.vault.outputs.registry_url }}
-      registry_user:   ${{ steps.vault.outputs.registry_user }}
-      registry_pass:   ${{ steps.vault.outputs.registry_pass }}
-      registry_ns:     ${{ steps.vault.outputs.registry_ns }}
-      sonar_token:     ${{ steps.vault.outputs.sonar_token }}
+      registry_url: ${{ steps.export.outputs.registry_url }}
+      registry_user: ${{ steps.export.outputs.registry_user }}
+      registry_pass: ${{ steps.export.outputs.registry_pass }}
+      registry_ns: ${{ steps.export.outputs.registry_ns }}
+      sonar_token: ${{ steps.export.outputs.sonar_token }}
 
     steps:
       - name: Authenticate to Vault and fetch CI secrets
@@ -70,12 +70,6 @@ jobs:
             secret/data/ci/pipeline registry_pass | REGISTRY_PASS ;
             secret/data/ci/pipeline registry_ns | REGISTRY_NS ;
             secret/data/ci/pipeline sonar_token | SONAR_TOKEN
-          #secrets: |
-          #  secret/data/ci/pipeline registry_url  | registry_url ;
-          #  secret/data/ci/pipeline registry_user | registry_user ;
-          #  secret/data/ci/pipeline registry_pass | registry_pass ;
-          #  secret/data/ci/pipeline registry_ns   | registry_ns ;
-          #  secret/data/ci/pipeline sonar_token   | sonar_token
 
       - name: Export outputs
         id: export
@@ -85,7 +79,6 @@ jobs:
           echo "registry_pass=$REGISTRY_PASS" >> $GITHUB_OUTPUT
           echo "registry_ns=$REGISTRY_NS" >> $GITHUB_OUTPUT
           echo "sonar_token=$SONAR_TOKEN" >> $GITHUB_OUTPUT
-
 
       - name: Safe Secret Validation (No Exposure)
         run: |
@@ -241,6 +234,11 @@ jobs:
         run: |
           SHA7=$(git rev-parse --short=7 HEAD)
           echo "image_tag=git-${SHA7}" >> "$GITHUB_OUTPUT"
+
+      - name: Debug outputs
+        run: |
+          echo "USER=${{ needs.fetch-secrets.outputs.registry_user }}"
+          echo "URL=${{ needs.fetch-secrets.outputs.registry_url }}"
 
       - name: Login to Container Registry
         run: |
