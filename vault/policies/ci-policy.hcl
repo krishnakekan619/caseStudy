@@ -1,9 +1,14 @@
 # ─── CI/CD Pipeline Policy ───────────────────────────────────────────────────
 # Granted to the GitHub Actions runner via AppRole.
 # Read-only access to CI secrets: Harbor credentials, SonarQube token.
-# No ability to write or delete secrets.
 
+# KV v2 Data Path
 path "secret/data/ci/*" {
+  capabilities = ["read", "list"]
+}
+
+# KV v2 Metadata Path (required for path validation)
+path "secret/metadata/ci/*" {
   capabilities = ["read", "list"]
 }
 
