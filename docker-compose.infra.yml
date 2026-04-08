@@ -1,21 +1,19 @@
-version: "3.9"
+#version: "3.9"
 
-# ─── Shared infrastructure: Harbor, SonarQube, Trivy, GitHub Runner ──────────
+# ─── Shared infrastructure: SonarQube, Trivy, GitHub Runner ──────────
 # Start with: docker compose -f docker-compose.infra.yml up -d
 
 networks:
   infra-net:
-    name: infra-net
+    external: true
   dev-net:
-    name: dev-net
+    external: true
   stage-net:
-    name: stage-net
+    external: true
   prod-net:
-    name: prod-net
+    external: true
 
 volumes:
-  harbor-registry-data:
-  harbor-db-data:
   sonarqube-data:
   sonarqube-db-data:
   trivy-cache:
@@ -23,62 +21,6 @@ volumes:
   sonar-cache:    # sonar-scanner work directory cache (analysis artifacts)
 
 services:
-
-  # ── Harbor: PostgreSQL backend ───────────────────────────────────────────────
-  harbor-db:
-    image: goharbor/harbor-db:v2.10.0
-    container_name: harbor-db
-    networks: [infra-net]
-    environment:
-      POSTGRES_PASSWORD: harbor123
-    volumes:
-      - harbor-db-data:/var/lib/postgresql/data
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  # ── Harbor: Core API ─────────────────────────────────────────────────────────
-  harbor-core:
-    image: goharbor/harbor-core:v2.10.0
-    container_name: harbor-core
-    networks: [infra-net]
-    depends_on:
-      harbor-db:
-        condition: service_healthy
-    environment:
-      DATABASE_TYPE:       postgresql
-      POSTGRESQL_HOST:     harbor-db
-      POSTGRESQL_PORT:     "5432"
-      POSTGRESQL_USERNAME: postgres
-      POSTGRESQL_PASSWORD: harbor123
-      POSTGRESQL_DATABASE: registry
-      HARBOR_ADMIN_PASSWORD: Harbor12345
-      SECRET_KEY:          changeme-32-char-secret-key!!!!!
-    restart: unless-stopped
-
-  # ── Harbor: Registry (image store) ──────────────────────────────────────────
-  harbor-registry:
-    image: goharbor/registry-photon:v2.10.0
-    container_name: harbor-registry
-    networks: [infra-net]
-    depends_on: [harbor-core]
-    ports:
-      - "5000:5000"
-    volumes:
-      - harbor-registry-data:/storage
-    restart: unless-stopped
-
-  # ── Harbor: Web Portal ───────────────────────────────────────────────────────
-  harbor-portal:
-    image: goharbor/harbor-portal:v2.10.0
-    container_name: harbor-portal
-    networks: [infra-net]
-    ports:
-      - "8080:8080"
-    restart: unless-stopped
 
   # ── SonarQube: PostgreSQL backend ────────────────────────────────────────────
   sonarqube-db:
@@ -120,7 +62,7 @@ services:
 
   # ── Trivy: Image Scanner ─────────────────────────────────────────────────────
   trivy:
-    image: aquasec/trivy:latest
+    image: aquasec/trivy:0.69.3
     container_name: trivy
     networks: [infra-net]
     volumes:
@@ -135,8 +77,10 @@ services:
     container_name: github-runner
     networks: [infra-net]
     environment:
-      RUNNER_NAME:  docker-runner-01
+      RUNNER_NAME:  docker-runner-ks
       REPO_URL:     https://github.com/${GITHUB_ORG}/${GITHUB_REPO}
+      ORG_NAME:     ${GITHUB_ORG}
+      REPO_NAME:    ${GITHUB_REPO}
       RUNNER_TOKEN: ${RUNNER_TOKEN}
       LABELS:       docker,self-hosted
     volumes:

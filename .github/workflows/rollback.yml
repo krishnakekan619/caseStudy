@@ -30,8 +30,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # ── Fetch Harbor credentials from Vault (same as ci-cd.yml) ──────────────
-      - name: Fetch Harbor credentials from Vault
+      # ── Fetch Registry credentials from Vault (same as ci-cd.yml) ──────────────
+      - name: Fetch Registry credentials from Vault
         id: vault
         uses: hashicorp/vault-action@v3
         with:
@@ -40,28 +40,33 @@ jobs:
           roleId:   ${{ secrets.VAULT_ROLE_ID }}
           secretId: ${{ secrets.VAULT_SECRET_ID }}
           secrets: |
-            secret/data/ci/pipeline harbor_registry | harbor_registry ;
-            secret/data/ci/pipeline harbor_username | harbor_username ;
-            secret/data/ci/pipeline harbor_password | harbor_password
+            secret/data/ci/pipeline registry_url  | registry_url ;
+            secret/data/ci/pipeline registry_user | registry_user ;
+            secret/data/ci/pipeline registry_pass | registry_pass ;
+            secret/data/ci/pipeline registry_ns   | registry_ns
 
-      - name: Login to Harbor
+      - name: Login to Container Registry
         run: |
-          echo "${{ steps.vault.outputs.harbor_password }}" | \
-            docker login ${{ steps.vault.outputs.harbor_registry }} \
-              -u "${{ steps.vault.outputs.harbor_username }}" --password-stdin
+          echo "${{ steps.vault.outputs.registry_pass }}" | \
+            docker login ${{ steps.vault.outputs.registry_url }} \
+              -u "${{ steps.vault.outputs.registry_user }}" --password-stdin
 
-      - name: Verify rollback tag exists in Harbor
+      - name: Verify rollback tag exists
+        env:
+          REGISTRY: ${{ steps.vault.outputs.registry_url || 'docker.io' }}
+          NS:       ${{ steps.vault.outputs.registry_ns || 'stocks' }}
         run: |
           for SVC in stock-listing trade; do
             docker pull \
-              ${{ steps.vault.outputs.harbor_registry }}/stocks/${SVC}:${{ github.event.inputs.rollback_tag }} \
+              ${REGISTRY}/${NS}/${SVC}:${{ github.event.inputs.rollback_tag }} \
               || (echo "ERROR: Tag '${{ github.event.inputs.rollback_tag }}' not found for ${SVC}" && exit 1)
           done
 
       - name: Roll back Dev
         if: github.event.inputs.environment == 'dev'
         env:
-          HARBOR_REGISTRY:      ${{ steps.vault.outputs.harbor_registry }}
+          REGISTRY_URL:         ${{ steps.vault.outputs.registry_url || 'docker.io' }}
+          REGISTRY_NAMESPACE:   ${{ steps.vault.outputs.registry_ns || 'stocks' }}
           IMAGE_TAG:            ${{ github.event.inputs.rollback_tag }}
           VAULT_ADDR:           ${{ env.VAULT_ADDR }}
           APP_VAULT_ROLE_ID:    ${{ secrets.APP_VAULT_ROLE_ID }}
@@ -73,7 +78,8 @@ jobs:
       - name: Roll back Stage
         if: github.event.inputs.environment == 'stage'
         env:
-          HARBOR_REGISTRY:      ${{ steps.vault.outputs.harbor_registry }}
+          REGISTRY_URL:         ${{ steps.vault.outputs.registry_url || 'docker.io' }}
+          REGISTRY_NAMESPACE:   ${{ steps.vault.outputs.registry_ns || 'stocks' }}
           IMAGE_TAG:            ${{ github.event.inputs.rollback_tag }}
           VAULT_ADDR:           ${{ env.VAULT_ADDR }}
           APP_VAULT_ROLE_ID:    ${{ secrets.APP_VAULT_ROLE_ID }}
@@ -85,7 +91,8 @@ jobs:
       - name: Roll back Prod
         if: github.event.inputs.environment == 'prod'
         env:
-          HARBOR_REGISTRY:      ${{ steps.vault.outputs.harbor_registry }}
+          REGISTRY_URL:         ${{ steps.vault.outputs.registry_url || 'docker.io' }}
+          REGISTRY_NAMESPACE:   ${{ steps.vault.outputs.registry_ns || 'stocks' }}
           IMAGE_TAG:            ${{ github.event.inputs.rollback_tag }}
           VAULT_ADDR:           ${{ env.VAULT_ADDR }}
           APP_VAULT_ROLE_ID:    ${{ secrets.APP_VAULT_ROLE_ID }}
@@ -110,7 +117,7 @@ jobs:
       # Always logout — clean credentials from Docker config on runner
       - name: Docker logout
         if: always()
-        run: docker logout ${{ steps.vault.outputs.harbor_registry }}
+        run: docker logout ${{ steps.vault.outputs.registry_url }}
 
       - name: Write run summary
         if: always()

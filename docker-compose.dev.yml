@@ -1,4 +1,4 @@
-version: "3.9"
+#version: "3.9"
 
 # ── Dev environment ───────────────────────────────────────────────────────────
 # Usage:
@@ -90,7 +90,7 @@ services:
 
   # ── Trade Service ────────────────────────────────────────────────────────────
   trade:
-    image: ${HARBOR_REGISTRY:-myregistry.local:5000}/stocks/trade:${IMAGE_TAG:-latest}
+    image: ${REGISTRY_URL:-docker.io}/${REGISTRY_NAMESPACE:-stocks}/trade:${IMAGE_TAG:-latest}
     container_name: dev-trade
     networks: [dev-net]
     depends_on:

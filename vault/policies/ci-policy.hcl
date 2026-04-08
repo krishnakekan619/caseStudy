@@ -7,8 +7,8 @@ path "secret/data/ci/*" {
   capabilities = ["read", "list"]
 }
 
-# Allow reading Harbor credentials
-path "secret/data/harbor/*" {
+# Allow reading Container Registry credentials
+path "secret/data/registry/*" {
   capabilities = ["read"]
 }
 

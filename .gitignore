@@ -5,7 +5,8 @@ vault/vault-init.json
 .env
 .env.*
 !.env.example
-
+GEMINI.md
+error.log
 # ── Python ────────────────────────────────────────────────────────────────────
 __pycache__/
 *.pyc
