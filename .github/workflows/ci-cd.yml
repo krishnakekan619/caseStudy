@@ -60,15 +60,15 @@ jobs:
         id: vault
         uses: hashicorp/vault-action@v3.0.0
         with:
-          url:      ${{ env.VAULT_ADDR }}
-          method:   approle
-          roleId:   ${{ secrets.VAULT_ROLE_ID }}
+          url: ${{ env.VAULT_ADDR }}
+          method: approle
+          roleId: ${{ secrets.VAULT_ROLE_ID }}
           secretId: ${{ secrets.VAULT_SECRET_ID }}
           secrets: |
-            secret/data/ci/pipeline registry_url | REGISTRY_URL ;
-            secret/data/ci/pipeline registry_user | REGISTRY_USER ;
-            secret/data/ci/pipeline registry_pass | REGISTRY_PASS ;
-            secret/data/ci/pipeline registry_ns | REGISTRY_NS ;
+            secret/data/ci/pipeline registry_url | REGISTRY_URL;
+            secret/data/ci/pipeline registry_user | REGISTRY_USER;
+            secret/data/ci/pipeline registry_pass | REGISTRY_PASS;
+            secret/data/ci/pipeline registry_ns | REGISTRY_NS;
             secret/data/ci/pipeline sonar_token | SONAR_TOKEN
 
       - name: Export outputs
@@ -79,6 +79,11 @@ jobs:
           echo "registry_pass=$REGISTRY_PASS" >> $GITHUB_OUTPUT
           echo "registry_ns=$REGISTRY_NS" >> $GITHUB_OUTPUT
           echo "sonar_token=$SONAR_TOKEN" >> $GITHUB_OUTPUT
+
+      - name: Debug Vault values
+        run: |
+          echo "USER=$REGISTRY_USER"
+          echo "URL=$REGISTRY_URL"
 
       - name: Safe Secret Validation (No Exposure)
         run: |
