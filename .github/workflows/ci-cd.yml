@@ -65,18 +65,18 @@ jobs:
           roleId:   ${{ secrets.VAULT_ROLE_ID }}
           secretId: ${{ secrets.VAULT_SECRET_ID }}
           secrets: |
-            secrets/secret/ci/pipeline registry_url  | registry_url ;
-            secrets/secret/ci/pipeline registry_user | registry_user ;
-            secrets/secret/ci/pipeline registry_pass | registry_pass ;
-            secrets/secret/ci/pipeline registry_ns   | registry_ns ;
-            secrets/secret/ci/pipeline sonar_token   | sonar_token
+            secret/ci//pipeline registry_url  | registry_url ;
+            secret/ci//pipeline registry_user | registry_user ;
+            secret/ci//pipeline registry_pass | registry_pass ;
+            secret/ci//pipeline registry_ns   | registry_ns ;
+            secret/ci//pipeline sonar_token   | sonar_token
 
       - name: Validate secrets
         run: |
           echo "Checking retrieved secrets..."
           if [ -z "${{ steps.vault.outputs.registry_user }}" ]; then
             echo "::error::Vault secrets were not retrieved correctly (registry_user is empty)."
-            echo "Path used: secrets/secret/ci/pipeline"
+            echo "Path used: secret/ci//pipeline"
             exit 1
           fi
           echo "Success: Secrets retrieved."
