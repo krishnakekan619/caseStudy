@@ -65,11 +65,27 @@ jobs:
           roleId:   ${{ secrets.VAULT_ROLE_ID }}
           secretId: ${{ secrets.VAULT_SECRET_ID }}
           secrets: |
-            secret/data/ci/pipeline registry_url  | registry_url ;
-            secret/data/ci/pipeline registry_user | registry_user ;
-            secret/data/ci/pipeline registry_pass | registry_pass ;
-            secret/data/ci/pipeline registry_ns   | registry_ns ;
-            secret/data/ci/pipeline sonar_token   | sonar_token
+            secret/data/ci/pipeline registry_url | REGISTRY_URL ;
+            secret/data/ci/pipeline registry_user | REGISTRY_USER ;
+            secret/data/ci/pipeline registry_pass | REGISTRY_PASS ;
+            secret/data/ci/pipeline registry_ns | REGISTRY_NS ;
+            secret/data/ci/pipeline sonar_token | SONAR_TOKEN
+          #secrets: |
+          #  secret/data/ci/pipeline registry_url  | registry_url ;
+          #  secret/data/ci/pipeline registry_user | registry_user ;
+          #  secret/data/ci/pipeline registry_pass | registry_pass ;
+          #  secret/data/ci/pipeline registry_ns   | registry_ns ;
+          #  secret/data/ci/pipeline sonar_token   | sonar_token
+
+        - name: Export outputs
+          id: export
+          run: |
+            echo "registry_url=$REGISTRY_URL" >> $GITHUB_OUTPUT
+            echo "registry_user=$REGISTRY_USER" >> $GITHUB_OUTPUT
+            echo "registry_pass=$REGISTRY_PASS" >> $GITHUB_OUTPUT
+            echo "registry_ns=$REGISTRY_NS" >> $GITHUB_OUTPUT
+            echo "sonar_token=$SONAR_TOKEN" >> $GITHUB_OUTPUT
+
 
       - name: Safe Secret Validation (No Exposure)
         run: |
