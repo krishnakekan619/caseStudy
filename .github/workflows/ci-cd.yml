@@ -83,11 +83,11 @@ jobs:
       - name: Export outputs
         id: export
         run: |
-          echo "registry_url=${{ env.REGISTRY_URL }}" >> $GITHUB_OUTPUT
-          echo "registry_user=${{ env.REGISTRY_USER }}" >> $GITHUB_OUTPUT
-          echo "registry_pass=${{ env.REGISTRY_PASS }}" >> $GITHUB_OUTPUT
-          echo "registry_ns=${{ env.REGISTRY_NS }}" >> $GITHUB_OUTPUT
-          echo "sonar_token=${{ env.SONAR_TOKEN }}" >> $GITHUB_OUTPUT
+          echo "registry_url=$REGISTRY_URL" >> $GITHUB_OUTPUT
+          echo "registry_user=$REGISTRY_USER" >> $GITHUB_OUTPUT
+          echo "registry_pass=$REGISTRY_PASS" >> $GITHUB_OUTPUT
+          echo "registry_ns=$REGISTRY_NS" >> $GITHUB_OUTPUT
+          echo "sonar_token=$SONAR_TOKEN" >> $GITHUB_OUTPUT
 
       - name: Debug Vault values
         run: |
@@ -257,11 +257,6 @@ jobs:
         run: |
           echo "USER=${{ needs.fetch-secrets.outputs.registry_user }}"
           echo "URL=${{ needs.fetch-secrets.outputs.registry_url }}"
-
-      - name: Debug outputs (final check)
-        run: |
-          echo "OUT_USER=${{ steps.export.outputs.registry_user }}"
-          echo "OUT_URL=${{ steps.export.outputs.registry_url }}"
 
       - name: Login to Container Registry
         run: |
