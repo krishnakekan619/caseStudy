@@ -49,11 +49,11 @@ jobs:
     name: Fetch Secrets from Vault
     runs-on: [self-hosted, docker]
     outputs:
-      registry_url: ${{ steps.vault.outputs.registry_url }}
-      registry_user: ${{ steps.vault.outputs.registry_user }}
-      registry_pass: ${{ steps.vault.outputs.registry_pass }}
-      registry_ns: ${{ steps.vault.outputs.registry_ns }}
-      sonar_token: ${{ steps.vault.outputs.sonar_token }}
+      registry_url: ${{ steps.vault.outputs.REGISTRY_URL }}
+      registry_user: ${{ steps.vault.outputs.REGISTRY_USER }}
+      registry_pass: ${{ steps.vault.outputs.REGISTRY_PASS }}
+      registry_ns: ${{ steps.vault.outputs.REGISTRY_NS }}
+      sonar_token: ${{ steps.vault.outputs.SONAR_TOKEN }}
 
     steps:
       - name: Authenticate to Vault and fetch CI secrets
@@ -65,34 +65,25 @@ jobs:
           roleId: ${{ secrets.VAULT_ROLE_ID }}
           secretId: ${{ secrets.VAULT_SECRET_ID }}
           secrets: |
-            secret/data/ci/pipeline registry_url | registry_url;
-            secret/data/ci/pipeline registry_user | registry_user;
-            secret/data/ci/pipeline registry_pass | registry_pass;
-            secret/data/ci/pipeline registry_ns | registry_ns;
-            secret/data/ci/pipeline sonar_token | sonar_token
+            secret/data/ci/pipeline registry_url | REGISTRY_URL;
+            secret/data/ci/pipeline registry_user | REGISTRY_USER;
+            secret/data/ci/pipeline registry_pass | REGISTRY_PASS;
+            secret/data/ci/pipeline registry_ns | REGISTRY_NS;
+            secret/data/ci/pipeline sonar_token | SONAR_TOKEN
 
       - name: Safe Secret Validation (No Exposure)
         run: |
           echo "════════ Secret Presence Check ════════"
-          if [ -n "$REG_USER" ]; then echo "✔ registry_user: FOUND (Length: ${#REG_USER})"; else echo "✘ registry_user: MISSING"; fi
-          if [ -n "$REG_PASS" ]; then echo "✔ registry_pass: FOUND (Length: ${#REG_PASS})"; else echo "✘ registry_pass: MISSING"; fi
+          if [ -n "$REGISTRY_URL" ]; then echo "✔ registry_url: FOUND (Length: ${#REGISTRY_URL})"; else echo "✘ registry_url: MISSING"; fi
+          if [ -n "$REGISTRY_USER" ]; then echo "✔ registry_user: FOUND (Length: ${#REGISTRY_USER})"; else echo "✘ registry_user: MISSING"; fi
+          if [ -n "$REGISTRY_PASS" ]; then echo "✔ registry_pass: FOUND (Length: ${#REGISTRY_PASS})"; else echo "✘ registry_pass: MISSING"; fi
           if [ -n "$SONAR_TOKEN" ]; then echo "✔ sonar_token:   FOUND (Length: ${#SONAR_TOKEN})"; else echo "✘ sonar_token:   MISSING"; fi
           echo "══════════════════════════════════════"
         env:
-          REG_USER: ${{ steps.vault.outputs.registry_user }}
-          REG_PASS: ${{ steps.vault.outputs.registry_pass }}
-          SONAR_TOKEN: ${{ steps.vault.outputs.sonar_token }}
-
-      - name: Validate secrets
-        run: |
-          echo "Checking retrieved secrets..."
-          if [ -z "${{ steps.vault.outputs.registry_user }}" ]; then
-            echo "::error::Vault secrets were not retrieved correctly (registry_user is empty)."
-            echo "Path used: secret/data/ci/pipeline"
-            exit 1
-          fi
-          echo "Success: Secrets retrieved."
-
+          REGISTRY_URL: ${{ steps.vault.outputs.REGISTRY_URL }}
+          REGISTRY_USER: ${{ steps.vault.outputs.REGISTRY_USER }}
+          REGISTRY_PASS: ${{ steps.vault.outputs.REGISTRY_PASS }}
+          SONAR_TOKEN: ${{ steps.vault.outputs.SONAR_TOKEN }}  
 
   # ════════════════════════════════════════════════════════════════════════════
   # 0b. Detect which services actually changed
@@ -239,15 +230,20 @@ jobs:
 
           if [ -z "$REGISTRY_USER" ] || [ -z "$REGISTRY_PASS" ] || [ -z "$REGISTRY_URL" ]; then
             echo "::error::Registry credentials are missing"
-            echo "registry_user: ${#REGISTRY_USER}"
-            echo "registry_pass: ${#REGISTRY_PASS}"
-            echo "registry_url: ${#REGISTRY_URL}"
+            echo "registry_user length: ${#REGISTRY_USER}"
+            echo "registry_pass length: ${#REGISTRY_PASS}"
+            echo "registry_url length: ${#REGISTRY_URL}"
             exit 1
           fi
 
+          echo "::notice::Attempting login to $REGISTRY_URL"
           echo "$REGISTRY_PASS" | \
             docker login "$REGISTRY_URL" \
-              -u "$REGISTRY_USER" --password-stdin
+              -u "$REGISTRY_USER" --password-stdin || {
+                echo "::error::Docker login failed"
+                exit 1
+              }
+          echo "::notice::Docker login successful"
 
       # Set up Docker Buildx so we can use --cache-from/--cache-to type=registry
       - name: Set up Docker Buildx
