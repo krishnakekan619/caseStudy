@@ -233,9 +233,21 @@ jobs:
 
       - name: Login to Container Registry
         run: |
-          echo "${{ needs.fetch-secrets.outputs.registry_pass }}" | \
-            docker login ${{ needs.fetch-secrets.outputs.registry_url }} \
-              -u "${{ needs.fetch-secrets.outputs.registry_user }}" --password-stdin
+          REGISTRY_USER="${{ needs.fetch-secrets.outputs.registry_user }}"
+          REGISTRY_PASS="${{ needs.fetch-secrets.outputs.registry_pass }}"
+          REGISTRY_URL="${{ needs.fetch-secrets.outputs.registry_url }}"
+
+          if [ -z "$REGISTRY_USER" ] || [ -z "$REGISTRY_PASS" ] || [ -z "$REGISTRY_URL" ]; then
+            echo "::error::Registry credentials are missing"
+            echo "registry_user: ${#REGISTRY_USER}"
+            echo "registry_pass: ${#REGISTRY_PASS}"
+            echo "registry_url: ${#REGISTRY_URL}"
+            exit 1
+          fi
+
+          echo "$REGISTRY_PASS" | \
+            docker login "$REGISTRY_URL" \
+              -u "$REGISTRY_USER" --password-stdin
 
       # Set up Docker Buildx so we can use --cache-from/--cache-to type=registry
       - name: Set up Docker Buildx
@@ -331,9 +343,21 @@ jobs:
     steps:
       - name: Login to Container Registry
         run: |
-          echo "${{ needs.fetch-secrets.outputs.registry_pass }}" | \
-            docker login ${{ needs.fetch-secrets.outputs.registry_url }} \
-              -u "${{ needs.fetch-secrets.outputs.registry_user }}" --password-stdin
+          REGISTRY_USER="${{ needs.fetch-secrets.outputs.registry_user }}"
+          REGISTRY_PASS="${{ needs.fetch-secrets.outputs.registry_pass }}"
+          REGISTRY_URL="${{ needs.fetch-secrets.outputs.registry_url }}"
+
+          if [ -z "$REGISTRY_USER" ] || [ -z "$REGISTRY_PASS" ] || [ -z "$REGISTRY_URL" ]; then
+            echo "::error::Registry credentials are missing"
+            echo "registry_user: ${#REGISTRY_USER}"
+            echo "registry_pass: ${#REGISTRY_PASS}"
+            echo "registry_url: ${#REGISTRY_URL}"
+            exit 1
+          fi
+
+          echo "$REGISTRY_PASS" | \
+            docker login "$REGISTRY_URL" \
+              -u "$REGISTRY_USER" --password-stdin
 
       - name: Scan ${{ matrix.service }} for CVEs
         env:
@@ -372,9 +396,21 @@ jobs:
 
       - name: Login to Container Registry
         run: |
-          echo "${{ needs.fetch-secrets.outputs.registry_pass }}" | \
-            docker login ${{ needs.fetch-secrets.outputs.registry_url }} \
-              -u "${{ needs.fetch-secrets.outputs.registry_user }}" --password-stdin
+          REGISTRY_USER="${{ needs.fetch-secrets.outputs.registry_user }}"
+          REGISTRY_PASS="${{ needs.fetch-secrets.outputs.registry_pass }}"
+          REGISTRY_URL="${{ needs.fetch-secrets.outputs.registry_url }}"
+
+          if [ -z "$REGISTRY_USER" ] || [ -z "$REGISTRY_PASS" ] || [ -z "$REGISTRY_URL" ]; then
+            echo "::error::Registry credentials are missing"
+            echo "registry_user: ${#REGISTRY_USER}"
+            echo "registry_pass: ${#REGISTRY_PASS}"
+            echo "registry_url: ${#REGISTRY_URL}"
+            exit 1
+          fi
+
+          echo "$REGISTRY_PASS" | \
+            docker login "$REGISTRY_URL" \
+              -u "$REGISTRY_USER" --password-stdin
 
       - name: Tag images as dev-<sha>
         env:
@@ -428,9 +464,21 @@ jobs:
 
       - name: Login to Container Registry
         run: |
-          echo "${{ needs.fetch-secrets.outputs.registry_pass }}" | \
-            docker login ${{ needs.fetch-secrets.outputs.registry_url }} \
-              -u "${{ needs.fetch-secrets.outputs.registry_user }}" --password-stdin
+          REGISTRY_USER="${{ needs.fetch-secrets.outputs.registry_user }}"
+          REGISTRY_PASS="${{ needs.fetch-secrets.outputs.registry_pass }}"
+          REGISTRY_URL="${{ needs.fetch-secrets.outputs.registry_url }}"
+
+          if [ -z "$REGISTRY_USER" ] || [ -z "$REGISTRY_PASS" ] || [ -z "$REGISTRY_URL" ]; then
+            echo "::error::Registry credentials are missing"
+            echo "registry_user: ${#REGISTRY_USER}"
+            echo "registry_pass: ${#REGISTRY_PASS}"
+            echo "registry_url: ${#REGISTRY_URL}"
+            exit 1
+          fi
+
+          echo "$REGISTRY_PASS" | \
+            docker login "$REGISTRY_URL" \
+              -u "$REGISTRY_USER" --password-stdin
 
       - name: Tag images as stage-<sha>
         env:
@@ -488,9 +536,21 @@ jobs:
 
       - name: Login to Container Registry
         run: |
-          echo "${{ needs.fetch-secrets.outputs.registry_pass }}" | \
-            docker login ${{ needs.fetch-secrets.outputs.registry_url }} \
-              -u "${{ needs.fetch-secrets.outputs.registry_user }}" --password-stdin
+          REGISTRY_USER="${{ needs.fetch-secrets.outputs.registry_user }}"
+          REGISTRY_PASS="${{ needs.fetch-secrets.outputs.registry_pass }}"
+          REGISTRY_URL="${{ needs.fetch-secrets.outputs.registry_url }}"
+
+          if [ -z "$REGISTRY_USER" ] || [ -z "$REGISTRY_PASS" ] || [ -z "$REGISTRY_URL" ]; then
+            echo "::error::Registry credentials are missing"
+            echo "registry_user: ${#REGISTRY_USER}"
+            echo "registry_pass: ${#REGISTRY_PASS}"
+            echo "registry_url: ${#REGISTRY_URL}"
+            exit 1
+          fi
+
+          echo "$REGISTRY_PASS" | \
+            docker login "$REGISTRY_URL" \
+              -u "$REGISTRY_USER" --password-stdin
 
       - name: Tag images with semver + latest
         env:
