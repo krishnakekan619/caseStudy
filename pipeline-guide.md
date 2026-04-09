@@ -87,4 +87,31 @@ If you need to trigger a full re-scan and deployment of **both** services withou
 2.  `error.log`
 3.  `db/init.sql` (Global database schema)
 
-Modifying these files causes the `paths-filter` job to mark both `stock-listing` and `trade` as "changed," initiating the full suite of tests, analysis, and deployment.
+## 7. SonarQube Setup & Configuration
+
+SonarQube is used for static code analysis, identifying bugs, vulnerabilities, and code smells before deployment.
+
+### 7a. Configuration Files
+Each service contains a `sonar-project.properties` file in its root directory (e.g., `services/stock-listing/sonar-project.properties`). This file defines:
+*   `sonar.projectKey`: Unique identifier for the project in SonarQube.
+*   `sonar.sources`: Directory containing the source code (typically `app`).
+*   `sonar.tests`: Directory containing the tests (typically `tests`).
+*   `sonar.python.version`: Target Python version (3.12).
+
+### 7b. Pipeline Integration
+The `sonarqube` job in the pipeline performs the following steps:
+1.  **Secret Retrieval**: Fetches the `sonar_token` from Vault at `secret/data/ci/pipeline`.
+2.  **Containerized Scan**: Runs the `sonarsource/sonar-scanner-cli` Docker image.
+3.  **Volume Mounting**: The entire workspace is mounted to `/src` inside the container.
+4.  **Execution**: The scanner is executed with `-Dsonar.projectBaseDir` pointed to the specific service directory (e.g., `/src/services/stock-listing`).
+
+### 7c. Quality Gate
+The scanner is configured with `-Dsonar.qualitygate.wait=true`. This means the pipeline job will **block and wait** for SonarQube to process the results and return a status. If the code fails the defined Quality Gate (e.g., too many new bugs, insufficient test coverage), the pipeline job will fail, preventing the `build` stage from starting.
+
+---
+
+## 8. Troubleshooting Common Errors
+
+### "requirements.txt not found" or "missing sonar.projectKey"
+These errors typically occur on Windows-based self-hosted runners due to how Docker handles volume mounting and backslashes in paths.
+*   **The Fix**: Mount the root `${{ github.workspace }}` to a neutral path like `/src` in the container and use `/` forward slashes for the working directory (`-w`) and project base directory (`-Dsonar.projectBaseDir`). This ensures compatibility across different host operating systems.

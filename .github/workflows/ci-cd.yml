@@ -164,9 +164,10 @@ jobs:
 
       - name: Run pytest (SQLite, in-container, pip cache mounted)
         run: |
+          # Use ${PWD} for Bash-compatible pathing on Windows
           docker run --rm \
             -v pip-cache:/root/.cache/pip \
-            -v "${{ github.workspace }}/services/${{ matrix.service }}:/app" \
+            -v "${PWD}/services/${{ matrix.service }}:/app" \
             -w /app \
             python:3.12-slim \
             sh -c "pip install -q -r requirements.txt && pytest tests/ -v --tb=short"
@@ -211,7 +212,7 @@ jobs:
             -e SONAR_HOST_URL=${{ env.SONAR_HOST }} \
             -e SONAR_LOGIN=${{ steps.vault.outputs.sonar_token }} \
             -v sonar-cache:/opt/sonar-scanner/.sonar/cache \
-            -v "${{ github.workspace }}/services/${{ matrix.service }}:/usr/src" \
+            -v "${PWD}/services/${{ matrix.service }}:/usr/src" \
             sonarsource/sonar-scanner-cli:5.0.1 \
             sonar-scanner \
               -Dsonar.projectBaseDir=/usr/src \
