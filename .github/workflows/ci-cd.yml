@@ -49,11 +49,11 @@ jobs:
     name: Fetch Secrets from Vault
     runs-on: [self-hosted, docker]
     outputs:
-      registry_url: ${{ steps.vault.outputs.REGISTRY_URL }}
-      registry_user: ${{ steps.vault.outputs.REGISTRY_USER }}
-      registry_pass: ${{ steps.vault.outputs.REGISTRY_PASS }}
-      registry_ns: ${{ steps.vault.outputs.REGISTRY_NS }}
-      sonar_token: ${{ steps.vault.outputs.SONAR_TOKEN }}
+      registry_url: ${{ steps.export.outputs.registry_url }}
+      registry_user: ${{ steps.export.outputs.registry_user }}
+      registry_pass: ${{ steps.export.outputs.registry_pass }}
+      registry_ns: ${{ steps.export.outputs.registry_ns }}
+      sonar_token: ${{ steps.export.outputs.sonar_token }}
 
     steps:
       - name: Authenticate to Vault and fetch CI secrets
@@ -71,19 +71,28 @@ jobs:
             secret/data/ci/pipeline registry_ns | REGISTRY_NS;
             secret/data/ci/pipeline sonar_token | SONAR_TOKEN
 
+      - name: Export outputs
+        id: export
+        run: |
+          echo "registry_url=$REGISTRY_URL" >> $GITHUB_OUTPUT
+          echo "registry_user=$REGISTRY_USER" >> $GITHUB_OUTPUT
+          echo "registry_pass=$REGISTRY_PASS" >> $GITHUB_OUTPUT
+          echo "registry_ns=$REGISTRY_NS" >> $GITHUB_OUTPUT
+          echo "sonar_token=$SONAR_TOKEN" >> $GITHUB_OUTPUT
+
       - name: Safe Secret Validation (No Exposure)
         run: |
           echo "════════ Secret Presence Check ════════"
-          if [ -n "$REGISTRY_URL" ]; then echo "✔ registry_url: FOUND (Length: ${#REGISTRY_URL})"; else echo "✘ registry_url: MISSING"; fi
-          if [ -n "$REGISTRY_USER" ]; then echo "✔ registry_user: FOUND (Length: ${#REGISTRY_USER})"; else echo "✘ registry_user: MISSING"; fi
-          if [ -n "$REGISTRY_PASS" ]; then echo "✔ registry_pass: FOUND (Length: ${#REGISTRY_PASS})"; else echo "✘ registry_pass: MISSING"; fi
+          if [ -n "$REG_URL" ]; then echo "✔ registry_url: FOUND (Length: ${#REG_URL})"; else echo "✘ registry_url: MISSING"; fi
+          if [ -n "$REG_USER" ]; then echo "✔ registry_user: FOUND (Length: ${#REG_USER})"; else echo "✘ registry_user: MISSING"; fi
+          if [ -n "$REG_PASS" ]; then echo "✔ registry_pass: FOUND (Length: ${#REG_PASS})"; else echo "✘ registry_pass: MISSING"; fi
           if [ -n "$SONAR_TOKEN" ]; then echo "✔ sonar_token:   FOUND (Length: ${#SONAR_TOKEN})"; else echo "✘ sonar_token:   MISSING"; fi
           echo "══════════════════════════════════════"
         env:
-          REGISTRY_URL: ${{ steps.vault.outputs.REGISTRY_URL }}
-          REGISTRY_USER: ${{ steps.vault.outputs.REGISTRY_USER }}
-          REGISTRY_PASS: ${{ steps.vault.outputs.REGISTRY_PASS }}
-          SONAR_TOKEN: ${{ steps.vault.outputs.SONAR_TOKEN }}  
+          REG_URL: ${{ steps.export.outputs.registry_url }}
+          REG_USER: ${{ steps.export.outputs.registry_user }}
+          REG_PASS: ${{ steps.export.outputs.registry_pass }}
+          SONAR_TOKEN: ${{ steps.export.outputs.sonar_token }}
 
   # ════════════════════════════════════════════════════════════════════════════
   # 0b. Detect which services actually changed
