@@ -133,9 +133,13 @@ jobs:
             stock-listing:
               - 'services/stock-listing/**'
               - 'db/**'
+              - 'pipeline-guide.md'
+              - 'error.log'
             trade:
               - 'services/trade/**'
               - 'db/**'
+              - 'pipeline-guide.md'
+              - 'error.log'
 
   # ════════════════════════════════════════════════════════════════════════════
   # 1. Unit tests — ONLY for changed services, both run in parallel
@@ -260,7 +264,9 @@ jobs:
         id: meta
         run: |
           SHA7=$(git rev-parse --short=7 HEAD)
-          echo "image_tag=git-${SHA7}" >> "$GITHUB_OUTPUT"
+          DATE=$(date +%d-%m-%y)
+          SVC="${{ matrix.service }}"
+          echo "image_tag=${SVC}-${DATE}-git-${SHA7}" >> "$GITHUB_OUTPUT"
 
       - name: Login to Container Registry
         run: |
@@ -471,10 +477,13 @@ jobs:
           NS:       ${{ steps.vault.outputs.registry_ns || 'stocks' }}
         run: |
           SHA7=$(git rev-parse --short=7 HEAD)
+          DATE=$(date +%d-%m-%y)
           for SVC in stock-listing trade; do
-            docker pull  ${REGISTRY}/${NS}/${SVC}:git-${SHA7}
-            docker tag   ${REGISTRY}/${NS}/${SVC}:git-${SHA7} ${REGISTRY}/${NS}/${SVC}:dev-${SHA7}
-            docker push  ${REGISTRY}/${NS}/${SVC}:dev-${SHA7}
+            SRC_TAG="${SVC}-${DATE}-git-${SHA7}"
+            DEST_TAG="dev-${SHA7}"
+            docker pull  ${REGISTRY}/${NS}/${SVC}:${SRC_TAG}
+            docker tag   ${REGISTRY}/${NS}/${SVC}:${SRC_TAG} ${REGISTRY}/${NS}/${SVC}:${DEST_TAG}
+            docker push  ${REGISTRY}/${NS}/${SVC}:${DEST_TAG}
           done
           echo "DEPLOY_TAG=dev-${SHA7}" >> "$GITHUB_ENV"
 
@@ -550,10 +559,13 @@ jobs:
           NS:       ${{ steps.vault.outputs.registry_ns || 'stocks' }}
         run: |
           SHA7=$(git rev-parse --short=7 HEAD)
+          DATE=$(date +%d-%m-%y)
           for SVC in stock-listing trade; do
-            docker pull  ${REGISTRY}/${NS}/${SVC}:git-${SHA7}
-            docker tag   ${REGISTRY}/${NS}/${SVC}:git-${SHA7} ${REGISTRY}/${NS}/${SVC}:stage-${SHA7}
-            docker push  ${REGISTRY}/${NS}/${SVC}:stage-${SHA7}
+            SRC_TAG="${SVC}-${DATE}-git-${SHA7}"
+            DEST_TAG="stage-${SHA7}"
+            docker pull  ${REGISTRY}/${NS}/${SVC}:${SRC_TAG}
+            docker tag   ${REGISTRY}/${NS}/${SVC}:${SRC_TAG} ${REGISTRY}/${NS}/${SVC}:${DEST_TAG}
+            docker push  ${REGISTRY}/${NS}/${SVC}:${DEST_TAG}
           done
           echo "DEPLOY_TAG=stage-${SHA7}" >> "$GITHUB_ENV"
 
@@ -633,14 +645,17 @@ jobs:
           NS:       ${{ steps.vault.outputs.registry_ns || 'stocks' }}
         run: |
           SHA7=$(git rev-parse --short=7 HEAD)
+          DATE=$(date +%d-%m-%y)
           VERSION=${{ steps.version.outputs.version }}
           for SVC in stock-listing trade; do
-            docker pull  ${REGISTRY}/${NS}/${SVC}:git-${SHA7}
-            docker tag   ${REGISTRY}/${NS}/${SVC}:git-${SHA7} ${REGISTRY}/${NS}/${SVC}:${VERSION}
-            docker tag   ${REGISTRY}/${NS}/${SVC}:git-${SHA7} ${REGISTRY}/${NS}/${SVC}:latest
+            SRC_TAG="${SVC}-${DATE}-git-${SHA7}"
+            docker pull  ${REGISTRY}/${NS}/${SVC}:${SRC_TAG}
+            docker tag   ${REGISTRY}/${NS}/${SVC}:${SRC_TAG} ${REGISTRY}/${NS}/${SVC}:${VERSION}
+            docker tag   ${REGISTRY}/${NS}/${SVC}:${SRC_TAG} ${REGISTRY}/${NS}/${SVC}:latest
             docker push  ${REGISTRY}/${NS}/${SVC}:${VERSION}
             docker push  ${REGISTRY}/${NS}/${SVC}:latest
           done
+
 
       - name: Deploy to Prod
         env:
