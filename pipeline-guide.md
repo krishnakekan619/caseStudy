@@ -113,5 +113,9 @@ The scanner is configured with `-Dsonar.qualitygate.wait=true`. This means the p
 ## 8. Troubleshooting Common Errors
 
 ### "requirements.txt not found" or "missing sonar.projectKey"
-These errors typically occur on Windows-based self-hosted runners due to how Docker handles volume mounting and backslashes in paths.
-*   **The Fix**: Mount the root `${{ github.workspace }}` to a neutral path like `/src` in the container and use `/` forward slashes for the working directory (`-w`) and project base directory (`-Dsonar.projectBaseDir`). This ensures compatibility across different host operating systems.
+These errors occur on Windows-based self-hosted runners because backslashes (`\`) and drive letters (`D:\`) in paths like `${{ github.workspace }}` break Docker's volume mounting parser.
+
+**The Fix implemented in this pipeline**:
+1.  **Enforce Bash Shell**: All jobs use `defaults: run: shell: bash`.
+2.  **Path Normalization**: We use `ABS_DIR=$(pwd -W | sed 's/\\/\//g')`. This Bash command converts the current directory to a Windows-style path with forward slashes (e.g., `D:/path/to/repo`), which is the most reliable format for Docker on Windows.
+3.  **Strict Quoting**: Volume mounts are always quoted to handle spaces: `-v "${ABS_DIR}/services/...:/app"`.
