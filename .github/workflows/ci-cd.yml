@@ -79,6 +79,12 @@ jobs:
           echo "registry_pass=$REGISTRY_PASS" >> $GITHUB_OUTPUT
           echo "registry_ns=$REGISTRY_NS" >> $GITHUB_OUTPUT
           echo "sonar_token=$SONAR_TOKEN" >> $GITHUB_OUTPUT
+        env:
+          REGISTRY_URL: ${{ steps.vault.outputs.REGISTRY_URL }}
+          REGISTRY_USER: ${{ steps.vault.outputs.REGISTRY_USER }}
+          REGISTRY_PASS: ${{ steps.vault.outputs.REGISTRY_PASS }}
+          REGISTRY_NS: ${{ steps.vault.outputs.REGISTRY_NS }}
+          SONAR_TOKEN: ${{ steps.vault.outputs.SONAR_TOKEN }}
 
       - name: Safe Secret Validation (No Exposure)
         run: |
