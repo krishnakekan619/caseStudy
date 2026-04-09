@@ -21,6 +21,11 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Permissions needed for keyless image signing with cosign
+permissions:
+  id-token: write
+  contents: read
+
 env:
   VAULT_ADDR: ${{ secrets.VAULT_ADDR }}
   SONAR_HOST: http://sonarqube:9000
@@ -304,11 +309,12 @@ jobs:
       - name: Sign image (keyless OIDC)
         env:
           COSIGN_EXPERIMENTAL: "1"
+          COSIGN_YES: "true"
           REGISTRY: ${{ steps.vault.outputs.registry_url || 'docker.io' }}
           NS: ${{ steps.vault.outputs.registry_ns || 'stocks' }}
           SVC: ${{ matrix.service }}
           TAG: ${{ steps.meta.outputs.image_tag }}
-        run: cosign sign --yes "${REGISTRY}/${NS}/${SVC}:${TAG}"
+        run: cosign sign "${REGISTRY}/${NS}/${SVC}:${TAG}"
 
       - name: Generate SBOM (CycloneDX) with Trivy
         env:
@@ -328,6 +334,8 @@ jobs:
 
       - name: Attach SBOM to image
         env:
+          COSIGN_EXPERIMENTAL: "1"
+          COSIGN_YES: "true"
           REGISTRY: ${{ steps.vault.outputs.registry_url || 'docker.io' }}
           NS: ${{ steps.vault.outputs.registry_ns || 'stocks' }}
           SVC: ${{ matrix.service }}
