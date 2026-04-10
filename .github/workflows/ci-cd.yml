@@ -174,12 +174,14 @@ jobs:
 
       - name: Run pytest (SQLite, in-container, pip cache mounted)
         run: |
-          docker run --rm \
-            -v pip-cache:/root/.cache/pip \
-            -v "${{ github.workspace }}/services/${{ matrix.service }}:/app" \
-            -w /app \
-            python:3.12-slim \
-            sh -c "ls -la && pip install -q -r requirements.txt && pytest tests/ -v --tb=short"
+          pip install -r services/${{ matrix.service }}/requirements.txt
+          pytest services/${{ matrix.service }}/tests/ -v
+          ##docker run --rm \
+          ##  -v pip-cache:/root/.cache/pip \
+          ##  -v "${{ github.workspace }}/services/${{ matrix.service }}:/app" \
+          ##  -w /app \
+          ##  python:3.12-slim \
+          ##  sh -c "ls -la && pip install -q -r requirements.txt && pytest tests/ -v --tb=short"
 
   # ════════════════════════════════════════════════════════════════════════════
   # 2. Static code analysis — ONLY for changed services, both in parallel
