@@ -10,6 +10,10 @@ RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 # ── Stage 2: lean runtime image ───────────────────────────────────────────────
 FROM python:3.12-slim AS runtime
 
+# Patch OS-level vulnerabilities (e.g., libssl)
+RUN apt-get update && apt-get upgrade -y && \
+    rm -rf /var/lib/apt/lists/*
+
 # Non-root user — never run app code as root inside a container
 RUN addgroup --system appgroup && adduser --system --ingroup appgroup appuser
 
