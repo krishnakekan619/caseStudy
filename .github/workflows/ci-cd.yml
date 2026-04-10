@@ -216,20 +216,33 @@ jobs:
           secrets: |
             secret/data/ci/pipeline sonar_token ;
 
+      #- name: Run SonarQube scan — ${{ matrix.service }}
+      #  run: |
+      #    WS_PATH=$(echo "/${{ github.workspace }}" | sed 's/\\/\//g' | sed 's/://')
+      #    docker run --rm \
+      #      --network infra-net \
+      #      -e SONAR_HOST_URL=${{ env.SONAR_HOST }} \
+      #      -e SONAR_LOGIN=${{ steps.vault.outputs.sonar_token }} \
+      #      -v sonar-cache:/opt/sonar-scanner/.sonar/cache \
+      #      -v "/${WS_PATH}/services/${{ matrix.service }}:/usr/src" \
+      #      sonarsource/sonar-scanner-cli:5.0.1 \
+      #      sonar-scanner \
+      #        -Dsonar.projectBaseDir=/usr/src \
+      #        -Dsonar.qualitygate.wait=true
+
+      - name: Install Sonar Scanner
+        run: |
+          curl -sSLo sonar-scanner.zip https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-5.0.1.3006-linux.zip
+          unzip sonar-scanner.zip
+          mv sonar-scanner-* sonar-scanner
+
       - name: Run SonarQube scan — ${{ matrix.service }}
         run: |
-          WS_PATH=$(echo "/${{ github.workspace }}" | sed 's/\\/\//g' | sed 's/://')
-          docker run --rm \
-            --network infra-net \
-            -e SONAR_HOST_URL=${{ env.SONAR_HOST }} \
-            -e SONAR_LOGIN=${{ steps.vault.outputs.sonar_token }} \
-            -v sonar-cache:/opt/sonar-scanner/.sonar/cache \
-            -v "/${WS_PATH}/services/${{ matrix.service }}:/usr/src" \
-            sonarsource/sonar-scanner-cli:5.0.1 \
-            sonar-scanner \
-              -Dsonar.projectBaseDir=/usr/src \
-              -Dsonar.qualitygate.wait=true
-
+          ./sonar-scanner/bin/sonar-scanner \
+            -Dsonar.projectBaseDir=services/${{ matrix.service }} \
+            -Dsonar.host.url=${{ env.SONAR_HOST }} \
+            -Dsonar.login=${{ steps.vault.outputs.sonar_token }} \
+            -Dsonar.qualitygate.wait=true
   # ════════════════════════════════════════════════════════════════════════════
   # 3. Build Docker images & push to Harbor — ALWAYS both services in parallel
   #
