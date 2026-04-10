@@ -166,7 +166,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-       - name: Debug workspace
+      - name: Debug workspace
         run: |
           echo "Workspace: ${{ github.workspace }}"
           ls -la ${{ github.workspace }}/services/
