@@ -166,14 +166,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+       - name: Debug workspace
+        run: |
+          echo "Workspace: ${{ github.workspace }}"
+          ls -la ${{ github.workspace }}/services/
+          ls -la ${{ github.workspace }}/services/${{ matrix.service }}
+
       - name: Run pytest (SQLite, in-container, pip cache mounted)
         run: |
-          # Use double-slash trick for Git Bash on Windows to prevent path mangling
-          # Convert C:\path to /c/path
-          WS_PATH=$(echo "/${{ github.workspace }}" | sed 's/\\/\//g' | sed 's/://')
           docker run --rm \
             -v pip-cache:/root/.cache/pip \
-            -v "/${WS_PATH}/services/${{ matrix.service }}:/app" \
+            -v "${{ github.workspace }}/services/${{ matrix.service }}:/app" \
             -w /app \
             python:3.12-slim \
             sh -c "ls -la && pip install -q -r requirements.txt && pytest tests/ -v --tb=short"
