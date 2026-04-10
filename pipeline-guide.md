@@ -113,9 +113,11 @@ The scanner is configured with `-Dsonar.qualitygate.wait=true`. This means the p
 ## 8. Troubleshooting Common Errors
 
 ### "requirements.txt not found" or "missing sonar.projectKey"
-These errors occur on Windows-based self-hosted runners because backslashes (`\`) and drive letters (`D:\`) in paths like `${{ github.workspace }}` break Docker's volume mounting parser.
+These errors occur on Windows-based self-hosted runners when Git Bash for Windows automatically "mangles" paths during volume mounting (e.g., adding `C:/Program Files/Git`).
 
-**The Fix implemented in this pipeline**:
+**The Final Fix implemented in this pipeline**:
 1.  **Enforce Bash Shell**: All jobs use `defaults: run: shell: bash`.
-2.  **Path Normalization**: We use `ABS_DIR=$(pwd -W | sed 's/\\/\//g')`. This Bash command converts the current directory to a Windows-style path with forward slashes (e.g., `D:/path/to/repo`), which is the most reliable format for Docker on Windows.
-3.  **Strict Quoting**: Volume mounts are always quoted to handle spaces: `-v "${ABS_DIR}/services/...:/app"`.
+2.  **Path Normalization**: We use a transformation script:
+    `WS_PATH=$(echo "/${{ github.workspace }}" | sed 's/\\/\//g' | sed 's/://')`
+    This converts `D:\path\to\repo` to `/d/path/to/repo`.
+3.  **Double-Slash Trick**: We use a leading double slash `//` in the mount command (e.g., `//${WS_PATH}/...`). This tells Git Bash to pass the path literally to Docker without further translation, ensuring the Linux container can correctly mount the host directory.

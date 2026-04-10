@@ -168,14 +168,15 @@ jobs:
 
       - name: Run pytest (SQLite, in-container, pip cache mounted)
         run: |
-          # Use pwd -W to get Windows path with forward slashes for Docker
-          ABS_DIR=$(pwd -W | sed 's/\\/\//g')
+          # Use double-slash trick for Git Bash on Windows to prevent path mangling
+          # Convert C:\path to /c/path
+          WS_PATH=$(echo "/${{ github.workspace }}" | sed 's/\\/\//g' | sed 's/://')
           docker run --rm \
             -v pip-cache:/root/.cache/pip \
-            -v "${ABS_DIR}/services/${{ matrix.service }}:/app" \
+            -v "/${WS_PATH}/services/${{ matrix.service }}:/app" \
             -w /app \
             python:3.12-slim \
-            sh -c "pip install -q -r requirements.txt && pytest tests/ -v --tb=short"
+            sh -c "ls -la && pip install -q -r requirements.txt && pytest tests/ -v --tb=short"
 
   # ════════════════════════════════════════════════════════════════════════════
   # 2. Static code analysis — ONLY for changed services, both in parallel
@@ -212,13 +213,13 @@ jobs:
 
       - name: Run SonarQube scan — ${{ matrix.service }}
         run: |
-          ABS_DIR=$(pwd -W | sed 's/\\/\//g')
+          WS_PATH=$(echo "/${{ github.workspace }}" | sed 's/\\/\//g' | sed 's/://')
           docker run --rm \
             --network infra-net \
             -e SONAR_HOST_URL=${{ env.SONAR_HOST }} \
             -e SONAR_LOGIN=${{ steps.vault.outputs.sonar_token }} \
             -v sonar-cache:/opt/sonar-scanner/.sonar/cache \
-            -v "${ABS_DIR}/services/${{ matrix.service }}:/usr/src" \
+            -v "/${WS_PATH}/services/${{ matrix.service }}:/usr/src" \
             sonarsource/sonar-scanner-cli:5.0.1 \
             sonar-scanner \
               -Dsonar.projectBaseDir=/usr/src \
