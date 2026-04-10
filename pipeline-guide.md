@@ -179,3 +179,5 @@ These errors occurred on Windows-based self-hosted runners when Git Bash "mangle
 
 ### Image Signing Failure (expired_token)
 *   **The Fix**: Added `permissions: id-token: write` to the workflow and set `COSIGN_YES="true"` to enable non-interactive, keyless OIDC signing.
+
+any improvements?
